@@ -331,36 +331,11 @@ npm run serve
 
 ## 5.安装Python环境
 
-本项目使用`conda`管理依赖环境。如果不方便安装`conda`，需要根据实际的操作系统安装好`libopus`和`ffmpeg`。
-如果确定使用`conda`，则安装好后，开始执行以下命令。
+本项目已切换为`pixi`管理环境。`pixi`会统一管理`Python 3.10`、`ffmpeg`、`libopus`、`libiconv`以及项目所需的Python依赖。
 
-重要提示！windows 用户，可以通过安装`Anaconda`来管理环境。安装好`Anaconda`后，在`开始`那里搜索`anaconda`相关的关键词，
-找到`Anaconda Prpmpt`，使用管理员身份运行它。如下图。
+请先安装`pixi`，安装方式可参考官方文档：[pixi.sh](https://pixi.sh/latest/)。
 
-![conda_prompt](./images/conda_env_1.png)
-
-运行之后，如果你能看到命令行窗口前面有一个(base)字样，说明你成功进入了`conda`环境。那么你就可以执行以下命令了。
-
-![conda_env](./images/conda_env_2.png)
-
-```
-conda remove -n xiaozhi-esp32-server --all -y
-conda create -n xiaozhi-esp32-server python=3.10 -y
-conda activate xiaozhi-esp32-server
-
-# 添加清华源通道
-conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/main
-conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/pkgs/free
-conda config --add channels https://mirrors.tuna.tsinghua.edu.cn/anaconda/cloud/conda-forge
-
-conda install libopus -y
-conda install ffmpeg -y
-
-# 在 Linux 环境下进行部署时,如出现类似缺失 libiconv.so.2 动态库的报错 请通过以下命令进行安装
-conda install libiconv -y
-```
-
-请注意，以上命令，不是一股脑执行就成功的，你需要一步步执行，每一步执行完后，都检查一下输出的日志，查看是否成功。
+安装好`pixi`后，继续往下。
 
 ## 6.安装本项目依赖
 
@@ -374,12 +349,9 @@ conda install libiconv -y
 你需要把它重命名成`xiaozhi-esp32-server`，在这个文件里，进入到`main`文件夹，再进入到`xiaozhi-server`，好了请记住这个目录`xiaozhi-server`。
 
 ```
-# 继续使用conda环境
-conda activate xiaozhi-esp32-server
 # 进入到你的项目根目录，再进入main/xiaozhi-server
 cd main/xiaozhi-server
-pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
-pip install -r requirements.txt
+pixi install
 ```
 
 ### 7.下载语音识别模型文件
@@ -422,8 +394,7 @@ manager-api:
 
 ```
 # 确保在xiaozhi-server目录下执行
-conda activate xiaozhi-esp32-server
-python app.py
+pixi run start
 ```
 
 如果你能看到，类似以下日志,则是本项目服务启动成功的标志。

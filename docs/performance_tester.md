@@ -21,7 +21,7 @@ VLLM:
 
 ASR:
 ```
-4.在main/xiaozhi-server目录下运行performance_tester.py: 
+4.在main/xiaozhi-server目录下运行性能测试工具:
 ```
-python performance_tester.py
+pixi run performance-tester
 ```
