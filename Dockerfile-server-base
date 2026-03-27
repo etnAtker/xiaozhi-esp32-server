@@ -4,7 +4,7 @@ FROM ghcr.io/prefix-dev/pixi:0.66.0-bullseye
 
 # 安装系统依赖
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libopus0 ffmpeg locales && \
+    apt-get install -y --no-install-recommends locales && \
     sed -i '/zh_CN.UTF-8/s/^# //g' /etc/locale.gen && \
     locale-gen && \
     apt-get clean && \
