@@ -9,8 +9,10 @@ sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin 
 2、编译docker镜像
 ```
 #进入项目根目录
+# 先编译server基础镜像
+docker build -t xiaozhi-esp32-server:server-base -f ./Dockerfile-server-base .
 # 编译server
-docker build -t xiaozhi-esp32-server:server_latest -f ./Dockerfile-server .
+docker build -t xiaozhi-esp32-server:server_latest -f ./Dockerfile-server --build-arg BASE_IMAGE=xiaozhi-esp32-server:server-base .
 # 编译web
 docker build -t xiaozhi-esp32-server:web_latest -f ./Dockerfile-web .
 

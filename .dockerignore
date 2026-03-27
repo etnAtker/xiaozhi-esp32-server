@@ -3,5 +3,7 @@ __pycache__
 *.pyc
 .env
 Dockerfile
+.pixi
+main/xiaozhi-server/.pixi
 tmp/
 data/

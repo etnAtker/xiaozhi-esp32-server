@@ -136,11 +136,9 @@ else
   echo "已杀掉进程 $PID"
 fi
 cd main/xiaozhi-server
-# 初始化conda环境
-source ~/.bashrc
-conda activate xiaozhi-esp32-server
-pip install -r requirements.txt
-nohup python app.py >/dev/null &
+# 初始化pixi环境
+pixi install
+nohup pixi run start >/dev/null &
 tail -f /home/system/xiaozhi/xiaozhi-esp32-server/main/xiaozhi-server/tmp/server.log
 ```
 
