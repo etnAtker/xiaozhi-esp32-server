@@ -7,13 +7,12 @@
 
 ### 2、为什么会出现"TTS 任务出错 文件不存在"？📁
 
-建议：检查一下是否正确使用`conda` 安装了`libopus`和`ffmpeg`库。
+建议：检查一下是否已经在项目目录执行过`pixi install`，确认`pixi`环境里的`libopus`和`ffmpeg`已正确安装。
 
-如果没有安装，就安装
+如果没有安装，就进入`main/xiaozhi-server`目录执行：
 
 ```
-conda install conda-forge::libopus
-conda install conda-forge::ffmpeg
+pixi install
 ```
 
 ### 3、TTS 经常失败，经常超时 ⏰
