@@ -6,6 +6,7 @@ class TextMessageType(Enum):
     HELLO = "hello"
     ABORT = "abort"
     LISTEN = "listen"
+    RECORD = "record"
     IOT = "iot"
     MCP = "mcp"
     SERVER = "server"

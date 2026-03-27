@@ -41,6 +41,9 @@ server:
   mqtt_signature_key: null
   # UDP网关配置
   udp_gateway: null
+  # 独立录音功能的输出目录
+  recording:
+    output_dir: data/recordings
 log:
   # 设置控制台输出的日志格式，时间、日志级别、标签、消息
   log_format: "<green>{time:YYMMDD HH:mm:ss}</green>[{version}_{selected_module}][<light-blue>{extra[tag]}</light-blue>]-<level>{level}</level>-<light-green>{message}</light-green>"
