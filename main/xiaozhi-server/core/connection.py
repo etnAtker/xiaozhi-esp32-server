@@ -4,6 +4,7 @@ import copy
 import json
 import uuid
 import time
+import wave
 import queue
 import asyncio
 import threading
@@ -124,6 +125,7 @@ class ConnectionHandler:
         # 客户端状态相关
         self.client_abort = False
         self.client_is_speaking = False
+        self.client_is_recording = False
         self.client_listen_mode = "auto"
 
         # 线程任务相关
@@ -166,6 +168,10 @@ class ConnectionHandler:
         self.asr_audio = []
         self.asr_audio_queue = queue.Queue()
         self.current_speaker = None  # 存储当前说话人
+        self.record_audio = []
+        self.recording_output_dir = self.config.get("server", {}).get(
+            "recording", {}
+        ).get("output_dir", "data/recordings")
 
         # llm相关变量
         self.dialogue = Dialogue()
@@ -358,6 +364,10 @@ class ConnectionHandler:
                     return
 
             # 不需要头部处理或没有头部时，直接处理原始消息
+            if self.client_is_recording:
+                self.record_audio.append(message)
+                self.last_activity_time = time.time() * 1000
+                return
             self.asr_audio_queue.put(message)
 
     async def _process_mqtt_audio_message(self, message):
@@ -385,6 +395,10 @@ class ConnectionHandler:
             elif len(message) > 16:
                 # 没有指定长度或长度无效，去掉头部后处理剩余数据
                 audio_data = message[16:]
+                if self.client_is_recording:
+                    self.record_audio.append(audio_data)
+                    self.last_activity_time = time.time() * 1000
+                    return True
                 self.asr_audio_queue.put(audio_data)
                 return True
         except Exception as e:
@@ -403,7 +417,11 @@ class ConnectionHandler:
 
         # 如果时间戳是递增的，直接处理
         if timestamp >= self.last_processed_timestamp:
-            self.asr_audio_queue.put(audio_data)
+            if self.client_is_recording:
+                self.record_audio.append(audio_data)
+                self.last_activity_time = time.time() * 1000
+            else:
+                self.asr_audio_queue.put(audio_data)
             self.last_processed_timestamp = timestamp
 
             # 处理缓冲区中的后续包
@@ -413,7 +431,11 @@ class ConnectionHandler:
                 for ts in sorted(self.audio_timestamp_buffer.keys()):
                     if ts > self.last_processed_timestamp:
                         buffered_audio = self.audio_timestamp_buffer.pop(ts)
-                        self.asr_audio_queue.put(buffered_audio)
+                        if self.client_is_recording:
+                            self.record_audio.append(buffered_audio)
+                            self.last_activity_time = time.time() * 1000
+                        else:
+                            self.asr_audio_queue.put(buffered_audio)
                         self.last_processed_timestamp = ts
                         processed_any = True
                         break
@@ -1268,6 +1290,9 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
+            if self.client_is_recording:
+                await self.stop_recording_session()
+
             # 清理 VAD 连接资源
             if (
                     hasattr(self, "vad")
@@ -1406,8 +1431,69 @@ class ConnectionHandler:
 
         # Clear ASR buffers
         self.asr_audio.clear()
+        self.record_audio.clear()
 
         self.logger.bind(tag=TAG).debug("All audio states reset.")
+
+    def start_recording_session(self):
+        if self.client_is_recording:
+            return
+
+        self.client_is_recording = True
+        self.client_abort = False
+        self.client_is_speaking = False
+        self.last_activity_time = time.time() * 1000
+        self.record_audio.clear()
+        self.reset_audio_states()
+        self.logger.bind(tag=TAG).info("开始录音会话")
+
+    async def stop_recording_session(self):
+        if not self.client_is_recording:
+            return None
+
+        self.client_is_recording = False
+        self.last_activity_time = time.time() * 1000
+        file_path = self._save_recording_audio()
+        self.record_audio.clear()
+
+        if file_path:
+            self.logger.bind(tag=TAG).info(f"录音文件已保存: {file_path}")
+        else:
+            self.logger.bind(tag=TAG).warning("录音结束，但没有可保存的音频数据")
+
+        return file_path
+
+    def _save_recording_audio(self):
+        if len(self.record_audio) == 0:
+            return None
+
+        os.makedirs(self.recording_output_dir, exist_ok=True)
+
+        try:
+            from core.providers.asr.base import ASRProviderBase
+
+            if self.audio_format == "pcm":
+                pcm_data = self.record_audio
+            else:
+                pcm_data = ASRProviderBase.decode_opus(self.record_audio)
+
+            pcm_bytes = b"".join(pcm_data)
+            if len(pcm_bytes) == 0:
+                return None
+
+            file_name = f"record_{self.session_id}_{uuid.uuid4().hex}.wav"
+            file_path = os.path.join(self.recording_output_dir, file_name)
+
+            with wave.open(file_path, "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(16000)
+                wav_file.writeframes(pcm_bytes)
+
+            return file_path
+        except Exception as e:
+            self.logger.bind(tag=TAG).error(f"保存录音文件失败: {e}")
+            return None
 
     def chat_and_close(self, text):
         """Chat with the user and then close the connection"""
