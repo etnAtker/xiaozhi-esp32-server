@@ -1155,13 +1155,20 @@ class ConnectionHandler:
                 for future, tool_call_data, tool_input in futures_with_data:
                     result = future.result()
                     tool_results.append((result, tool_call_data))
+
+                    # 使用公共方法上报工具调用结果
+                    enqueue_tool_report(
+                        self,
+                        tool_call_data["name"],
+                        tool_input,
+                        str(result.result) if result.result else None,
+                        report_tool_call=False,
+                    )
+
                 self.perf_tracker.mark("tool_batch_finished_at", first_only=False)
                 self.perf_tracker.record_tool_batch(
                     (time.monotonic() - tool_batch_started_at) * 1000
                 )
-
-                    # 使用公共方法上报工具调用结果
-                    enqueue_tool_report(self, tool_call_data['name'], tool_input, str(result.result) if result.result else None, report_tool_call=False)
 
                 # 统一处理工具调用结果
                 if tool_results:
