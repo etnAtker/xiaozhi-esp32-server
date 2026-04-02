@@ -244,6 +244,8 @@ class TTSProviderBase(ABC):
                 sentence_id = str(uuid.uuid4().hex)
                 conn.sentence_id = sentence_id
         # 对于单句的文本，进行分段处理
+        if conn.perf_tracker.has_active_turn():
+            conn.perf_tracker.mark_tts_text_queued()
         segments = re.split(r"([。！？!?；;\n])", content_detail)
         for seg in segments:
             self.tts_text_queue.put(

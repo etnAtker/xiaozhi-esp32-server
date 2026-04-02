@@ -85,6 +85,8 @@ class ASRProviderBase(ABC):
         """并行处理ASR和声纹识别"""
         try:
             total_start_time = time.monotonic()
+            conn.perf_tracker.start_turn(source="asr")
+            conn.perf_tracker.mark("asr_started_at")
 
             # 准备音频数据
             if conn.audio_format == "pcm":
@@ -161,6 +163,7 @@ class ASRProviderBase(ABC):
 
             # 性能监控
             total_time = time.monotonic() - total_start_time
+            conn.perf_tracker.mark("asr_finished_at", first_only=False)
             logger.bind(tag=TAG).debug(f"总处理耗时: {total_time:.3f}s")
 
             # 检查文本长度
@@ -172,7 +175,11 @@ class ASRProviderBase(ABC):
                 enqueue_asr_report(conn, enhanced_text, audio_snapshot)
                 # 使用自定义模块进行上报
                 await startToChat(conn, enhanced_text)
+            else:
+                conn.perf_tracker.finalize("empty_asr")
         except Exception as e:
+            conn.perf_tracker.add_error("asr", str(e))
+            conn.perf_tracker.finalize("asr_failed", error=str(e))
             logger.bind(tag=TAG).error(f"处理语音停止失败: {e}")
             import traceback
 

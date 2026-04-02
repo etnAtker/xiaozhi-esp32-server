@@ -75,6 +75,11 @@ async def startToChat(conn: "ConnectionHandler", text):
     else:
         conn.current_speaker = None
 
+    if conn.perf_tracker.has_active_turn():
+        conn.perf_tracker.update_query(actual_text)
+    else:
+        conn.perf_tracker.start_turn(source="text", query=actual_text)
+
     if conn.need_bind:
         await check_bind_device(conn)
         return

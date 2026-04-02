@@ -1,6 +1,7 @@
 """统一工具处理器"""
 
 import json
+import time
 from typing import Dict, List, Any, Optional
 from config.logger import setup_logging
 from plugins_func.loadplugins import auto_import_modules
@@ -140,6 +141,8 @@ class UnifiedToolHandler:
         self, conn, function_call_data: Dict[str, Any]
     ) -> Optional[ActionResponse]:
         """处理LLM函数调用"""
+        tool_start_time = time.monotonic()
+        tool_name = function_call_data.get("name", "unknown")
         try:
             # 处理多函数调用
             if "function_calls" in function_call_data:
@@ -149,10 +152,20 @@ class UnifiedToolHandler:
                         call["name"], call.get("arguments", {})
                     )
                     responses.append(result)
-                return self._combine_responses(responses)
+                combined_result = self._combine_responses(responses)
+                if conn.perf_tracker.has_active_turn():
+                    conn.perf_tracker.record_tool_call(
+                        "multi_function_call",
+                        (time.monotonic() - tool_start_time) * 1000,
+                        action=combined_result.action.name
+                        if getattr(combined_result.action, "name", None)
+                        else str(combined_result.action),
+                    )
+                return combined_result
 
             # 处理单函数调用
             function_name = function_call_data["name"]
+            tool_name = function_name
             arguments = function_call_data.get("arguments", {})
 
             # 如果arguments是字符串，尝试解析为JSON
@@ -176,10 +189,25 @@ class UnifiedToolHandler:
 
             # 执行工具调用
             result = await self.tool_manager.execute_tool(function_name, arguments)
+            if conn.perf_tracker.has_active_turn():
+                conn.perf_tracker.record_tool_call(
+                    function_name,
+                    (time.monotonic() - tool_start_time) * 1000,
+                    action=result.action.name
+                    if getattr(result.action, "name", None)
+                    else str(result.action),
+                )
             return result
 
         except Exception as e:
             self.logger.error(f"处理function call错误: {e}")
+            if conn.perf_tracker.has_active_turn():
+                conn.perf_tracker.record_tool_call(
+                    tool_name,
+                    (time.monotonic() - tool_start_time) * 1000,
+                    success=False,
+                    error=str(e),
+                )
             return ActionResponse(action=Action.ERROR, response=str(e))
 
     def _combine_responses(self, responses: List[ActionResponse]) -> ActionResponse:

@@ -3,6 +3,11 @@ from aiohttp import web
 from config.logger import setup_logging
 from core.api.ota_handler import OTAHandler
 from core.api.vision_handler import VisionHandler
+from core.observability import (
+    observability_page,
+    observability_turn_detail_api,
+    observability_turns_api,
+)
 
 TAG = __name__
 
@@ -41,6 +46,7 @@ class SimpleHttpServer:
 
             if port:
                 app = web.Application()
+                app["app_config"] = self.config
 
                 if not read_config_from_api:
                     # 如果没有开启智控台，只是单模块运行，就需要再添加简单OTA接口，用于下发websocket接口
@@ -71,6 +77,12 @@ class SimpleHttpServer:
                         ),
                         web.options(
                             "/mcp/vision/explain", self.vision_handler.handle_options
+                        ),
+                        web.get("/ob", observability_page),
+                        web.get("/ob/api/turns", observability_turns_api),
+                        web.get(
+                            "/ob/api/turns/{turn_id}",
+                            observability_turn_detail_api,
                         ),
                     ]
                 )
