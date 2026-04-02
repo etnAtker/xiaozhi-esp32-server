@@ -43,6 +43,7 @@ from core.utils.prompt_manager import PromptManager
 from core.utils.voiceprint_provider import VoiceprintProvider
 from core.utils.util import get_system_error_response
 from core.utils import textUtils
+from core.observability import ConnectionPerformanceTracker
 
 
 TAG = __name__
@@ -101,6 +102,8 @@ class ConnectionHandler:
         self.config = copy.deepcopy(config)
         self.session_id = str(uuid.uuid4())
         self.logger = setup_logging()
+        self.selected_module_str = build_module_string(self.config.get("selected_module", {}))
+        self.perf_tracker = ConnectionPerformanceTracker(self)
         self.server = server  # 保存server实例的引用
 
         self.need_bind = False  # 是否需要绑定设备
@@ -509,6 +512,7 @@ class ConnectionHandler:
                 self.config.get("selected_module", {})
             )
             self.logger = create_connection_logger(self.selected_module_str)
+            self.perf_tracker.set_selected_module(self.selected_module_str)
 
             """初始化组件"""
             if self.config.get("prompt") is not None:
@@ -859,7 +863,9 @@ class ConnectionHandler:
 
         # 为最顶层时新建会话ID和发送FIRST请求
         if depth == 0:
+            self.perf_tracker.ensure_turn(source="chat", query=query)
             self.sentence_id = str(uuid.uuid4().hex)
+            self.perf_tracker.attach_sentence(self.sentence_id)
             self.dialogue.put(Message(role="user", content=query))
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
@@ -868,6 +874,7 @@ class ConnectionHandler:
                     content_type=ContentType.ACTION,
                 )
             )
+        self.perf_tracker.update_depth(depth)
 
         # 设置最大递归深度，避免无限循环，可根据实际需求调整
         MAX_DEPTH = 5
@@ -958,6 +965,8 @@ class ConnectionHandler:
             self.dialogue.put(Message(role="user", content=tool_call_reminder, is_temporary=True))
 
         try:
+            llm_call_started_at = time.monotonic()
+            self.perf_tracker.mark("llm_prepare_started_at")
             # 使用带记忆的对话
             memory_str = None
             # 仅当query非空（代表用户询问）时查询记忆
@@ -967,6 +976,7 @@ class ConnectionHandler:
                 )
                 memory_str = future.result()
 
+            self.perf_tracker.mark("llm_started_at")
             if self.intent_type == "function_call" and functions is not None:
                 # 使用支持functions的streaming接口
                 llm_responses = self.llm.response_with_functions(
@@ -984,6 +994,8 @@ class ConnectionHandler:
                     ),
                 )
         except Exception as e:
+            self.perf_tracker.add_error("llm_init", str(e))
+            self.perf_tracker.finalize("llm_init_failed", error=str(e))
             self.logger.bind(tag=TAG).error(f"LLM 处理出错 {query}: {e}")
             return None
 
@@ -996,6 +1008,7 @@ class ConnectionHandler:
         emotion_flag = True
         try:
             for response in llm_responses:
+                self.perf_tracker.mark("llm_first_chunk_at")
                 if self.client_abort:
                     break
                 if self.intent_type == "function_call" and functions is not None:
@@ -1009,15 +1022,18 @@ class ConnectionHandler:
                     if not tool_call_flag and content_arguments.startswith("<tool_call>"):
                         # print("content_arguments", content_arguments)
                         tool_call_flag = True
+                        self.perf_tracker.mark_tool_detected()
 
                     if tools_call is not None and len(tools_call) > 0:
                         tool_call_flag = True
+                        self.perf_tracker.mark_tool_detected(len(tools_call))
                         self._merge_tool_calls(tool_calls_list, tools_call)
                 else:
                     content = response
 
                 # 在llm回复中获取情绪表情，一轮对话只在开头获取一次
                 if emotion_flag and content is not None and content.strip():
+                    self.perf_tracker.mark("llm_first_text_at")
                     asyncio.run_coroutine_threadsafe(
                         textUtils.get_emotion(self, content),
                         self.loop,
@@ -1025,8 +1041,10 @@ class ConnectionHandler:
                     emotion_flag = False
 
                 if content is not None and len(content) > 0:
+                    self.perf_tracker.add_llm_chunk(content)
                     if not tool_call_flag:
                         response_message.append(content)
+                        self.perf_tracker.mark_tts_text_queued()
                         self.tts.tts_text_queue.put(
                             TTSMessageDTO(
                                 sentence_id=self.sentence_id,
@@ -1036,7 +1054,9 @@ class ConnectionHandler:
                             )
                         )
         except Exception as e:
+            self.perf_tracker.add_error("llm_stream", str(e))
             self.logger.bind(tag=TAG).error(f"LLM stream processing error: {e}")
+            self.perf_tracker.mark_tts_text_queued()
             self.tts.tts_text_queue.put(
                 TTSMessageDTO(
                     sentence_id=self.sentence_id,
@@ -1053,7 +1073,11 @@ class ConnectionHandler:
                         content_type=ContentType.ACTION,
                     )
                 )
+            self.perf_tracker.mark("llm_finished_at", first_only=False)
+            self.perf_tracker.record_llm_call((time.monotonic() - llm_call_started_at) * 1000)
             return
+        self.perf_tracker.mark("llm_finished_at", first_only=False)
+        self.perf_tracker.record_llm_call((time.monotonic() - llm_call_started_at) * 1000)
         # 处理function call
         if tool_call_flag:
             bHasError = False
@@ -1107,6 +1131,8 @@ class ConnectionHandler:
 
                 # 收集所有工具调用的 Future
                 futures_with_data = []
+                tool_batch_started_at = time.monotonic()
+                self.perf_tracker.mark("tool_batch_started_at")
                 for tool_call_data in tool_calls_list:
                     self.logger.bind(tag=TAG).debug(
                         f"function_name={tool_call_data['name']}, function_id={tool_call_data['id']}, function_arguments={tool_call_data['arguments']}"
@@ -1129,6 +1155,10 @@ class ConnectionHandler:
                 for future, tool_call_data, tool_input in futures_with_data:
                     result = future.result()
                     tool_results.append((result, tool_call_data))
+                self.perf_tracker.mark("tool_batch_finished_at", first_only=False)
+                self.perf_tracker.record_tool_batch(
+                    (time.monotonic() - tool_batch_started_at) * 1000
+                )
 
                     # 使用公共方法上报工具调用结果
                     enqueue_tool_report(self, tool_call_data['name'], tool_input, str(result.result) if result.result else None, report_tool_call=False)
@@ -1290,6 +1320,8 @@ class ConnectionHandler:
     async def close(self, ws=None):
         """资源清理方法"""
         try:
+            if self.perf_tracker.has_active_turn():
+                self.perf_tracker.finalize("closed")
             if self.client_is_recording:
                 await self.stop_recording_session()
 

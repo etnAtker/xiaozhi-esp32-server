@@ -18,6 +18,8 @@ PRE_BUFFER_COUNT = 5
 
 
 async def sendAudioMessage(conn: "ConnectionHandler", sentenceType, audios, text):
+    if conn.perf_tracker.has_active_turn():
+        conn.perf_tracker.mark("tts_started_at")
     if conn.tts.tts_audio_first_sentence:
         conn.logger.bind(tag=TAG).info(f"发送第一段语音: {text}")
         conn.tts.tts_audio_first_sentence = False
@@ -243,6 +245,8 @@ async def _do_send_audio(conn: "ConnectionHandler", opus_packet, flow_control):
     """
     执行实际的音频发送
     """
+    if conn.perf_tracker.has_active_turn():
+        conn.perf_tracker.mark("tts_first_packet_at")
     packet_index = flow_control.get("packet_count", 0)
     sequence = flow_control.get("sequence", 0)
 
@@ -287,6 +291,9 @@ async def send_tts_message(conn: "ConnectionHandler", state, text=None):
 
     # 发送消息到客户端
     await conn.websocket.send(json.dumps(message))
+    if state == "stop" and conn.perf_tracker.has_active_turn():
+        conn.perf_tracker.mark("tts_finished_at", first_only=False)
+        conn.perf_tracker.finalize("completed")
 
 
 async def send_stt_message(conn: "ConnectionHandler", text):
@@ -315,6 +322,8 @@ async def send_stt_message(conn: "ConnectionHandler", text):
     await conn.websocket.send(
         json.dumps({"type": "stt", "text": stt_text, "session_id": conn.session_id})
     )
+    if conn.perf_tracker.has_active_turn():
+        conn.perf_tracker.mark("stt_sent_at")
     await send_tts_message(conn, "start")
     # 发送start消息后客户端状态会处于说话中状态，同步服务端状态
     conn.client_is_speaking = True
