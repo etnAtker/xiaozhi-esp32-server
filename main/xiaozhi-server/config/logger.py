@@ -35,14 +35,24 @@ def build_module_string(selected_module):
     )
 
 
-def formatter(record):
+def _prepare_record(record):
     """为没有 tag 的日志添加默认值，并处理动态模块字符串"""
     record["extra"].setdefault("tag", record["name"])
+    record["extra"].setdefault("perf", False)
     # 如果没有设置 selected_module，使用默认值
     record["extra"].setdefault("selected_module", "00000000000000")
     # 将 selected_module 从 extra 提取到顶级，以支持 {selected_module} 格式
     record["selected_module"] = record["extra"]["selected_module"]
-    return record["message"]
+
+
+def standard_filter(record):
+    _prepare_record(record)
+    return not record["extra"].get("perf", False)
+
+
+def perf_filter(record):
+    _prepare_record(record)
+    return record["extra"].get("perf", False)
 
 
 def setup_logging():
@@ -84,7 +94,12 @@ def setup_logging():
         logger.remove()
 
         # 输出到控制台
-        logger.add(sys.stdout, format=log_format, level=log_level, filter=formatter)
+        logger.add(
+            sys.stdout,
+            format=log_format,
+            level=log_level,
+            filter=standard_filter,
+        )
 
         # 输出到文件 - 统一目录，按大小轮转
         # 日志文件完整路径
@@ -95,7 +110,7 @@ def setup_logging():
             log_file_path,
             format=log_format_file,
             level=log_level,
-            filter=formatter,
+            filter=standard_filter,
             rotation="10 MB",  # 每个文件最大10MB
             retention="30 days",  # 保留30天
             compression=None,
@@ -103,6 +118,21 @@ def setup_logging():
             enqueue=True,  # 异步安全
             backtrace=True,
             diagnose=True,
+        )
+
+        perf_log_path = os.path.join(log_dir, "perf.log")
+        logger.add(
+            perf_log_path,
+            format="{message}",
+            level="INFO",
+            filter=perf_filter,
+            rotation="10 MB",
+            retention="30 days",
+            compression=None,
+            encoding="utf-8",
+            enqueue=True,
+            backtrace=False,
+            diagnose=False,
         )
         _logger_initialized = True  # 标记为已初始化
 
@@ -112,3 +142,8 @@ def setup_logging():
 def create_connection_logger(selected_module_str):
     """为连接创建独立的日志器，绑定特定的模块字符串"""
     return logger.bind(selected_module=selected_module_str)
+
+
+def create_perf_logger(selected_module_str="00000000000000"):
+    """创建性能日志器，仅写入 perf.log"""
+    return logger.bind(perf=True, selected_module=selected_module_str, tag="PERF")
