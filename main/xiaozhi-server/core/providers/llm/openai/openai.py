@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 import httpx
 import openai
 from openai.types import CompletionUsage
@@ -13,6 +15,7 @@ class LLMProvider(LLMProviderBase):
     def __init__(self, config):
         self.model_name = config.get("model_name")
         self.api_key = config.get("api_key")
+        self.request_overrides = config.get("request_overrides")
         if "base_url" in config:
             self.base_url = config.get("base_url")
         else:
@@ -48,6 +51,27 @@ class LLMProvider(LLMProviderBase):
         self.client = openai.OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=httpx.Timeout(self.timeout))
 
     @staticmethod
+    def _deep_merge_dict(base, overrides):
+        merged = deepcopy(base)
+        for key, value in overrides.items():
+            if isinstance(merged.get(key), dict) and isinstance(value, dict):
+                merged[key] = LLMProvider._deep_merge_dict(merged[key], value)
+            else:
+                merged[key] = deepcopy(value)
+        return merged
+
+    def _apply_request_overrides(self, request_params):
+        if self.request_overrides in (None, ""):
+            return request_params
+
+        if not isinstance(self.request_overrides, dict):
+            logger.bind(tag=TAG).warning(f"Invalid LLM request_overrides ({type(self.request_overrides)}): {self.request_overrides}")
+            return request_params
+
+        logger.bind(tag=TAG).warning(f"LLM request_overrides merged: {self.request_overrides}")
+        return self._deep_merge_dict(request_params, self.request_overrides)
+
+    @staticmethod
     def normalize_dialogue(dialogue):
         """自动修复 dialogue 中缺失 content 的消息"""
         for msg in dialogue:
@@ -76,6 +100,7 @@ class LLMProvider(LLMProviderBase):
             if value is not None:
                 request_params[key] = value
 
+        request_params = self._apply_request_overrides(request_params)
         responses = self.client.chat.completions.create(**request_params)
 
         is_active = True
@@ -116,6 +141,7 @@ class LLMProvider(LLMProviderBase):
             if value is not None:
                 request_params[key] = value
 
+        request_params = self._apply_request_overrides(request_params)
         stream = self.client.chat.completions.create(**request_params)
 
         for chunk in stream:
