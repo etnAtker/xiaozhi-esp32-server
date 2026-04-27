@@ -78,7 +78,11 @@
         <div v-for="(row, rowIndex) in chunkedCallInfoFields" :key="rowIndex"
           style="display: flex; gap: 20px; margin-bottom: 0;">
           <el-form-item v-for="field in row" :key="field.prop" :label="field.label" :prop="field.prop" style="flex: 1;">
-            <el-input v-model="formData.configJson[field.prop]" :placeholder="field.placeholder"
+            <el-input v-if="field.type === 'json-textarea'" v-model="fieldJsonMap[field.prop]" type="textarea" :rows="3"
+              :placeholder="$t('modelConfigDialog.enterJsonExample')" class="custom-input-bg"
+              @change="(val) => handleJsonChange(field.prop, val)">
+            </el-input>
+            <el-input v-else v-model="formData.configJson[field.prop]" :placeholder="field.placeholder"
               :type="field.type || 'text'" class="custom-input-bg" :show-password="field.type === 'password'">
             </el-input>
           </el-form-item>
@@ -110,6 +114,7 @@ export default {
       providersLoaded: false,
       providerFields: [],
       currentProvider: null,
+      fieldJsonMap: {},
       formData: {
         id: '',
         modelName: '',
@@ -164,7 +169,12 @@ export default {
           fields: JSON.parse(item.fields || '[]').map(f => ({
             label: f.label,
             prop: f.key,
-            type: f.type === 'password' ? 'password' : 'text',
+            type:
+              f.type === 'dict'
+                ? 'json-textarea'
+                : f.type === 'password'
+                  ? 'password'
+                  : 'text',
             placeholder: `请输入${f.key}`
           }))
         }))
@@ -174,7 +184,10 @@ export default {
     initConfigJson() {
       const defaultConfig = {};
       this.providerFields.forEach(field => {
-        defaultConfig[field.prop] = '';
+        defaultConfig[field.prop] = this.getDefaultFieldValue(field);
+        if (field.type === 'json-textarea') {
+          this.$set(this.fieldJsonMap, field.prop, this.formatJson(defaultConfig[field.prop]));
+        }
       });
       this.formData.configJson = { ...defaultConfig };
     },
@@ -193,12 +206,26 @@ export default {
     initDynamicConfig() {
       const newConfig = {};
       this.providerFields.forEach(field => {
-        newConfig[field.prop] = this.formData.configJson[field.prop] || '';
+        const currentValue = this.formData.configJson[field.prop];
+        newConfig[field.prop] = currentValue === undefined || currentValue === null
+          ? this.getDefaultFieldValue(field)
+          : currentValue;
+        if (field.type === 'json-textarea') {
+          newConfig[field.prop] = this.ensureObject(newConfig[field.prop]);
+          this.$set(this.fieldJsonMap, field.prop, this.formatJson(newConfig[field.prop]));
+        }
       });
       this.formData.configJson = newConfig;
     },
     confirm() {
       this.saving = true;
+
+      Object.keys(this.fieldJsonMap).forEach((key) => {
+        const parsed = this.validateJson(this.fieldJsonMap[key]);
+        if (parsed !== null) {
+          this.formData.configJson[key] = parsed;
+        }
+      });
 
       // 校验模型ID不能为纯文字或空格
       if (this.formData.id && !this.validateModelId(this.formData.id)) {
@@ -260,6 +287,45 @@ export default {
       // 重置字段配置
       this.providerFields = [];
       this.currentProvider = null;
+      this.fieldJsonMap = {};
+    },
+    getDefaultFieldValue(field) {
+      return field.type === 'json-textarea' ? {} : '';
+    },
+    handleJsonChange(field, value) {
+      const parsed = this.validateJson(value);
+      if (parsed !== null) {
+        this.formData.configJson[field] = parsed;
+      }
+    },
+    validateJson(value) {
+      try {
+        const parsed = JSON.parse(value || '{}');
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          return parsed;
+        }
+        this.$message.error({
+          message: '必须输入字典格式（如 {"key":"value"}），保存则使用原数据',
+          showClose: true,
+        });
+        return null;
+      } catch (e) {
+        this.$message.error({
+          message: 'JSON格式错误（如 {"key":"value"}），保存则使用原数据',
+          showClose: true,
+        });
+        return null;
+      }
+    },
+    formatJson(obj) {
+      try {
+        return JSON.stringify(this.ensureObject(obj), null, 2);
+      } catch {
+        return '{}';
+      }
+    },
+    ensureObject(value) {
+      return typeof value === 'object' && value !== null && !Array.isArray(value) ? value : {};
     },
     
     // 校验模型ID：不能为纯文字或空格

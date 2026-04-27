@@ -347,7 +347,7 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         modelConfigEntity.setSort(modelConfigBodyDTO.getSort());
         modelConfigEntity.setIsEnabled(modelConfigBodyDTO.getIsEnabled());
         modelConfigEntity.setRemark(modelConfigBodyDTO.getRemark());
-        // 3. 处理配置JSON，仅更新非敏感字段和明确修改的敏感字段
+        // 3. 处理配置JSON，仅保留被掩码的敏感字段原值，其余字段按提交值覆盖
         if (modelConfigBodyDTO.getConfigJson() != null && originalEntity.getConfigJson() != null) {
             JSONObject originalJson = originalEntity.getConfigJson();
             JSONObject updatedJson = new JSONObject(originalJson); // 基于原始JSON进行修改
@@ -363,45 +363,45 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
                         updatedJson.put(key, value);
                     }
                 } else if (value instanceof JSONObject) {
-                    // 递归处理嵌套JSON
-                    mergeJson(updatedJson, key, (JSONObject) value);
+                    updatedJson.put(key, replaceJsonObjectKeepingMaskedSecrets(originalJson.getJSONObject(key), (JSONObject) value));
                 } else {
                     // 非敏感字段直接更新
                     updatedJson.put(key, value);
                 }
             }
 
+            normalizeRequestOverrides(updatedJson);
             modelConfigEntity.setConfigJson(updatedJson);
         }
 
         return modelConfigEntity;
     }
 
-    // 辅助方法：判断值是否是掩码格式
-    private boolean isMaskedValue(String value) {
-        if (value == null)
-            return false;
-        // 简单判断是否包含掩码的特征（***）
-        return value.contains("***");
-    }
-
-    // 辅助方法：递归合并JSON，保留原始敏感字段
-    private void mergeJson(JSONObject original, String key, JSONObject updated) {
-        if (!original.containsKey(key)) {
-            original.put(key, new JSONObject());
-        }
-        JSONObject originalChild = original.getJSONObject(key);
+    private JSONObject replaceJsonObjectKeepingMaskedSecrets(JSONObject original, JSONObject updated) {
+        JSONObject result = new JSONObject(updated);
+        JSONObject originalJson = original == null ? new JSONObject() : original;
 
         for (String childKey : updated.keySet()) {
             Object childValue = updated.get(childKey);
             if (childValue instanceof JSONObject) {
-                mergeJson(originalChild, childKey, (JSONObject) childValue);
-            } else {
-                if (!SensitiveDataUtils.isSensitiveField(childKey) ||
-                        (childValue instanceof String && !isMaskedValue((String) childValue))) {
-                    originalChild.put(childKey, childValue);
-                }
+                result.put(childKey, replaceJsonObjectKeepingMaskedSecrets(
+                        originalJson.getJSONObject(childKey),
+                        (JSONObject) childValue));
+            } else if (SensitiveDataUtils.isSensitiveField(childKey)
+                    && childValue instanceof String
+                    && SensitiveDataUtils.isMaskedValue((String) childValue)
+                    && originalJson.containsKey(childKey)) {
+                result.put(childKey, originalJson.get(childKey));
             }
+        }
+
+        return result;
+    }
+
+    private void normalizeRequestOverrides(JSONObject configJson) {
+        Object requestOverrides = configJson.get("request_overrides");
+        if (requestOverrides instanceof String && StringUtils.isBlank((String) requestOverrides)) {
+            configJson.put("request_overrides", new JSONObject());
         }
     }
 
@@ -412,6 +412,9 @@ public class ModelConfigServiceImpl extends BaseServiceImpl<ModelConfigDao, Mode
         ModelConfigEntity modelConfigEntity = ConvertUtils.sourceToTarget(modelConfigBodyDTO, ModelConfigEntity.class);
         modelConfigEntity.setModelType(modelType);
         modelConfigEntity.setIsDefault(0);
+        if (modelConfigEntity.getConfigJson() != null) {
+            normalizeRequestOverrides(modelConfigEntity.getConfigJson());
+        }
         return modelConfigEntity;
     }
 

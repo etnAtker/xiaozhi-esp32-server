@@ -345,14 +345,14 @@ export default {
       let configJson = model.configJson || {};
       this.dynamicCallInfoFields.forEach((field) => {
         if (!configJson.hasOwnProperty(field.prop)) {
-          configJson[field.prop] = "";
+          configJson[field.prop] = this.getDefaultFieldValue(field);
         } else if (field.type === "json-textarea") {
+          configJson[field.prop] = this.ensureObject(configJson[field.prop]);
           this.$set(
             this.fieldJsonMap,
             field.prop,
             this.formatJson(configJson[field.prop])
           );
-          configJson[field.prop] = this.ensureObject(configJson[field.prop]);
         } else if (typeof configJson[field.prop] !== "string") {
           configJson[field.prop] = String(configJson[field.prop]);
         }
@@ -404,7 +404,10 @@ export default {
       }
     },
     ensureObject(value) {
-      return typeof value === "object" ? value : {};
+      return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+    },
+    getDefaultFieldValue(field) {
+      return field.type === "json-textarea" ? {} : "";
     },
 
     // 检测字段是否为敏感字段
