@@ -15,7 +15,7 @@ TAG = __name__
 
 
 async def handleAudioMessage(conn: "ConnectionHandler", audio):
-    if conn.is_exiting:
+    if conn.stop_event.is_set():
         return
 
     if conn.client_is_recording:
