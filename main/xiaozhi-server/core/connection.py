@@ -171,6 +171,7 @@ class ConnectionHandler:
 
         # {"mcp":true} 表示启用MCP功能
         self.features = None
+        self.record_only = False
 
         # 标记连接是否来自MQTT
         self.conn_from_mqtt_gateway = False
@@ -253,6 +254,10 @@ class ConnectionHandler:
     async def _save_and_close(self, ws):
         """保存记忆并关闭连接"""
         try:
+            if self.record_only:
+                self.logger.bind(tag=TAG).info("纯录音会话，跳过聊天标题和记忆保存")
+                return
+
             # 守护线程1：独立生成标题（不依赖记忆模型）
             if self.session_id:
                 def generate_title_task():
